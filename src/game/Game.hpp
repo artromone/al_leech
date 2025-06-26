@@ -2,6 +2,7 @@
 #include "../entities/Projectile.hpp"
 #include "../entities/Worm.hpp"
 #include "../terrain/TerrainManager.hpp"
+#include "../utils/GameTypes.hpp"
 #include <SFML/Graphics.hpp>
 #include <vector>
 
@@ -18,6 +19,8 @@ private:
   bool gameStarted;
   bool gameEnded;
   int winner;
+  GameTypes::WeaponType currentWeapon;
+  int weaponIndex;
   std::vector<sf::Vector2f> trajectoryPoints;
   bool keysPressed[sf::Keyboard::KeyCount];
   float turnTimer;

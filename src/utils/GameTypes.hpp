@@ -8,4 +8,6 @@ constexpr float GRAVITY = 800.0f;
 constexpr float PROJECTILE_GRAVITY = 600.0f;
 constexpr int WORM_RADIUS = 15;
 constexpr int PROJECTILE_RADIUS = 4;
+
+enum class WeaponType { BAZOOKA, SNIPER_RIFLE, FRAG_GRENADE };
 } // namespace GameTypes

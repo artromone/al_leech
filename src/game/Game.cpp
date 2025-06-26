@@ -8,7 +8,9 @@ Game::Game()
              "Enhanced Wormix Game"),
       terrain(GameTypes::WINDOW_WIDTH, GameTypes::WINDOW_HEIGHT),
       currentPlayer(0), aimPower(0), gameStarted(true), gameEnded(false),
-      winner(-1), turnTimer(0.0f), canShoot(true) {
+      winner(-1), turnTimer(0.0f), canShoot(true),
+      currentWeapon(GameTypes::WeaponType::BAZOOKA),
+      weaponIndex(0) { // Добавить инициализацию
 
   // Инициализируем массив нажатых клавиш
   for (int i = 0; i < sf::Keyboard::KeyCount; i++) {
@@ -99,6 +101,15 @@ void Game::handleKeyPress(sf::Keyboard::Key key) {
     return;
 
   switch (key) {
+  case sf::Keyboard::Num1:
+    currentWeapon = GameTypes::WeaponType::BAZOOKA;
+    break;
+  case sf::Keyboard::Num2:
+    currentWeapon = GameTypes::WeaponType::SNIPER_RIFLE;
+    break;
+  case sf::Keyboard::Num3:
+    currentWeapon = GameTypes::WeaponType::FRAG_GRENADE;
+    break;
   case sf::Keyboard::Space:
     if (canShoot) {
       shoot();
@@ -110,7 +121,45 @@ void Game::handleKeyPress(sf::Keyboard::Key key) {
     jumpDir.y = std::min(jumpDir.y, -0.3f);
     activeWorm.jump(jumpDir);
   } break;
+  default:
+    // Обработка остальных клавиш
+    break;
   }
+}
+void Game::shoot() {
+  if (!canShoot || !gameStarted || gameEnded)
+    return;
+
+  Worm &activeWorm = worms[currentPlayer];
+  if (!activeWorm.isActive || !activeWorm.isMyTurn)
+    return;
+
+  float basePower = 400.0f;
+
+  // Настройки мощности для разных типов оружия
+  switch (currentWeapon) {
+  case GameTypes::WeaponType::SNIPER_RIFLE:
+    basePower = 800.0f; // Высокая скорость
+    break;
+  case GameTypes::WeaponType::FRAG_GRENADE:
+    basePower = 300.0f; // Меньшая скорость
+    break;
+  default: // BAZOOKA
+    basePower = 400.0f;
+    break;
+  }
+
+  float power = basePower + aimPower * 3.0f;
+  sf::Vector2f spawnPos = activeWorm.getCenter() + aimDirection * 25.0f;
+
+  projectiles.push_back(
+      Projectile(spawnPos.x, spawnPos.y, aimDirection.x * power,
+                 aimDirection.y * power, activeWorm.teamId, currentWeapon));
+
+  canShoot = false;
+  activeWorm.isMyTurn = false;
+  switchToNextPlayer();
+  trajectoryPoints.clear();
 }
 
 void Game::handleContinuousInput() {
@@ -144,27 +193,6 @@ void Game::updateAim() {
     aimPower = std::min(length / 3.0f, 100.0f);
     calculateTrajectory();
   }
-}
-
-void Game::shoot() {
-  if (!canShoot || !gameStarted || gameEnded)
-    return;
-
-  Worm &activeWorm = worms[currentPlayer];
-  if (!activeWorm.isActive || !activeWorm.isMyTurn)
-    return;
-
-  float power = 400.0f + aimPower * 3.0f;
-  sf::Vector2f spawnPos = activeWorm.getCenter() + aimDirection * 25.0f;
-
-  projectiles.push_back(Projectile(spawnPos.x, spawnPos.y,
-                                   aimDirection.x * power,
-                                   aimDirection.y * power, activeWorm.teamId));
-
-  canShoot = false;
-  activeWorm.isMyTurn = false;
-  switchToNextPlayer();
-  trajectoryPoints.clear();
 }
 
 void Game::switchToNextPlayer() {

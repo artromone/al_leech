@@ -1,17 +1,45 @@
+
 #include "Projectile.hpp"
 #include "../utils/GameTypes.hpp"
 #include "../utils/MathUtils.hpp"
 #include <cmath>
+#include <random>
 
-Projectile::Projectile(float x, float y, float vx, float vy, int team, int dmg,
-                       int expRadius) {
+Projectile::Projectile(float x, float y, float vx, float vy, int team,
+                       GameTypes::WeaponType type, int dmg, int expRadius) {
   position = sf::Vector2f(x, y);
   velocity = sf::Vector2f(vx, vy);
-  damage = dmg;
-  explosionRadius = expRadius;
+  weaponType = type;
   shooterTeam = team;
-  shape.setRadius(GameTypes::PROJECTILE_RADIUS);
-  shape.setFillColor(sf::Color::Yellow);
+  isShrapnel = false;
+
+  // Настройки в зависимости от типа оружия
+  switch (weaponType) {
+  case GameTypes::WeaponType::SNIPER_RIFLE:
+    damage = 75;
+    explosionRadius = 5;
+    penetrationPower = 3.0f;
+    shape.setRadius(2);
+    shape.setFillColor(sf::Color::Blue);
+    break;
+
+  case GameTypes::WeaponType::FRAG_GRENADE:
+    damage = 35;
+    explosionRadius = 45;
+    penetrationPower = 0.0f;
+    shape.setRadius(6);
+    shape.setFillColor(sf::Color::Green);
+    break;
+
+  default: // BAZOOKA
+    damage = dmg;
+    explosionRadius = expRadius;
+    penetrationPower = 0.0f;
+    shape.setRadius(GameTypes::PROJECTILE_RADIUS);
+    shape.setFillColor(sf::Color::Yellow);
+    break;
+  }
+
   shape.setOutlineThickness(1);
   shape.setOutlineColor(sf::Color::Red);
   isActive = true;
@@ -27,7 +55,6 @@ void Projectile::update(float deltaTime, TerrainManager &terrain) {
 
   totalTime += deltaTime;
 
-  // Анимация пуска
   if (isLaunching) {
     launchTimer -= deltaTime;
     if (launchTimer <= 0) {
@@ -36,20 +63,19 @@ void Projectile::update(float deltaTime, TerrainManager &terrain) {
     return;
   }
 
-  // Сохраняем предыдущую позицию для расчета расстояния
   sf::Vector2f oldPosition = position;
 
-  // Применяем гравитацию
-  velocity.y += GameTypes::PROJECTILE_GRAVITY * deltaTime;
+  // Применяем гравитацию (снайперка меньше подвержена гравитации)
+  float gravityMultiplier =
+      (weaponType == GameTypes::WeaponType::SNIPER_RIFLE) ? 0.3f : 1.0f;
+  velocity.y += GameTypes::PROJECTILE_GRAVITY * gravityMultiplier * deltaTime;
 
-  // Обновляем позицию
   position += velocity * deltaTime;
 
-  // Обновляем пройденное расстояние
   sf::Vector2f deltaPos = position - oldPosition;
   travelDistance += MathUtils::length(deltaPos);
 
-  // Добавляем точку в след
+  // След снаряда
   trail.push_back(position);
   if (trail.size() > 15) {
     trail.pop_front();
@@ -58,9 +84,31 @@ void Projectile::update(float deltaTime, TerrainManager &terrain) {
   // Проверяем коллизию с местностью
   if (terrain.isColliding(static_cast<int>(position.x),
                           static_cast<int>(position.y))) {
-    explode(terrain);
+    // Снайперская винтовка может пробивать препятствия
+    if (weaponType == GameTypes::WeaponType::SNIPER_RIFLE &&
+        penetrationPower > 0) {
+      terrain.destroyTerrain(static_cast<int>(position.x),
+                             static_cast<int>(position.y), 3);
+      penetrationPower -= 1.0f;
+      if (penetrationPower <= 0) {
+        explode(terrain);
+      }
+    } else {
+      explode(terrain);
+    }
     return;
   }
+
+  // Обновляем осколки для осколочной гранаты
+  for (auto &shrapnel : shrapnelPieces) {
+    shrapnel.update(deltaTime, terrain);
+  }
+
+  // Удаляем неактивные осколки
+  shrapnelPieces.erase(
+      std::remove_if(shrapnelPieces.begin(), shrapnelPieces.end(),
+                     [](const Projectile &p) { return !p.isActive; }),
+      shrapnelPieces.end());
 
   // Проверяем границы экрана
   if (position.y > GameTypes::WINDOW_HEIGHT || position.x < 0 ||
@@ -72,7 +120,37 @@ void Projectile::update(float deltaTime, TerrainManager &terrain) {
 void Projectile::explode(TerrainManager &terrain) {
   terrain.destroyTerrain(static_cast<int>(position.x),
                          static_cast<int>(position.y), explosionRadius);
+
+  // Создаем осколки для осколочной гранаты
+  if (weaponType == GameTypes::WeaponType::FRAG_GRENADE) {
+    createShrapnel();
+  }
+
   isActive = false;
+}
+
+void Projectile::createShrapnel() {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<> angleDist(0.0, 2.0 * M_PI);
+  std::uniform_real_distribution<> speedDist(150.0, 300.0);
+
+  // Создаем 8 осколков
+  for (int i = 0; i < 8; i++) {
+    float angle = angleDist(gen);
+    float speed = speedDist(gen);
+
+    float vx = cos(angle) * speed;
+    float vy = sin(angle) * speed;
+
+    Projectile shrapnel(position.x, position.y, vx, vy, shooterTeam,
+                        GameTypes::WeaponType::BAZOOKA, 15, 8);
+    shrapnel.isShrapnel = true;
+    shrapnel.shape.setRadius(2);
+    shrapnel.shape.setFillColor(sf::Color::Red);
+
+    shrapnelPieces.push_back(shrapnel);
+  }
 }
 
 void Projectile::draw(sf::RenderWindow &window) {
@@ -85,7 +163,20 @@ void Projectile::draw(sf::RenderWindow &window) {
       sf::CircleShape trailPoint(1.5f - (i * 0.1f));
       trailPoint.setPosition(trail[i].x - trailPoint.getRadius(),
                              trail[i].y - trailPoint.getRadius());
-      sf::Color trailColor = sf::Color::Yellow;
+
+      sf::Color trailColor;
+      switch (weaponType) {
+      case GameTypes::WeaponType::SNIPER_RIFLE:
+        trailColor = sf::Color::Blue;
+        break;
+      case GameTypes::WeaponType::FRAG_GRENADE:
+        trailColor = sf::Color::Green;
+        break;
+      default:
+        trailColor = sf::Color::Yellow;
+        break;
+      }
+
       trailColor.a = static_cast<sf::Uint8>(
           255 * (1.0f - static_cast<float>(i) / trail.size()));
       trailPoint.setFillColor(trailColor);
@@ -93,6 +184,7 @@ void Projectile::draw(sf::RenderWindow &window) {
     }
   }
 
+  // Рисуем основной снаряд
   if (isLaunching) {
     float scale = 1.0f + 0.8f * sin(totalTime * 30);
     sf::CircleShape launchShape = shape;
@@ -104,9 +196,14 @@ void Projectile::draw(sf::RenderWindow &window) {
     launchShape.setFillColor(launchColor);
     window.draw(launchShape);
   } else {
-    shape.setPosition(position.x - GameTypes::PROJECTILE_RADIUS,
-                      position.y - GameTypes::PROJECTILE_RADIUS);
+    shape.setPosition(position.x - shape.getRadius(),
+                      position.y - shape.getRadius());
     window.draw(shape);
+  }
+
+  // Рисуем осколки
+  for (auto &shrapnel : shrapnelPieces) {
+    shrapnel.draw(window);
   }
 }
 
@@ -116,10 +213,21 @@ bool Projectile::checkWormCollision(const Worm &worm) {
   if (!isActive || !worm.isActive || isLaunching)
     return false;
 
-  // Не наносим урон, если снаряд не пролетел минимальное расстояние
-  if (travelDistance < 50.0f)
+  float minDistance =
+      (weaponType == GameTypes::WeaponType::SNIPER_RIFLE) ? 30.0f : 50.0f;
+  if (travelDistance < minDistance)
     return false;
 
   float distanceLength = MathUtils::distance(position, worm.getCenter());
-  return distanceLength < 20;
+  bool collision = distanceLength < 20;
+
+  // Проверяем коллизии с осколками
+  for (auto &shrapnel : shrapnelPieces) {
+    if (shrapnel.checkWormCollision(worm)) {
+      collision = true;
+      break;
+    }
+  }
+
+  return collision;
 }
